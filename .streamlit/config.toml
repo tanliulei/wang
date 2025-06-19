@@ -1,0 +1,17 @@
+[server]
+headless = true
+port = $PORT
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#38b6ff"
+backgroundColor = "#f8fafc"
+secondaryBackgroundColor = "#e0e7ef"
+textColor = "#262730"
+
+[client]
+showErrorDetails = false
