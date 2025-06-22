@@ -177,36 +177,31 @@ def process_excel_data(df):
 
 def save_to_excel(df, save_path):
     """
-    保存DataFrame到Excel文件，并对A列列宽设置为原始宽度的1.8倍，A列日期和时间用逗号隔开，其他标记逻辑同前。第五列数值大于等于5000的金额和交易对方字体标橙（优先级低于红色），去掉绿色标记。
+    保存DataFrame到Excel文件，并对A列列宽设置为原始宽度的2倍，A列日期和时间用空格隔开。第5列连续两行及以上的固定数值且大于等于80，且这些行第3列内容含“支出”，则将这些区段的第1列、第3列、第5列、第6列字体标红。
     """
     try:
         with pd.ExcelWriter(save_path, engine='openpyxl') as writer:
-            # 先处理A列内容：将日期和时间用逗号隔开
+            # 先处理A列内容：将日期和时间用空格隔开
             df_mod = df.copy()
             if df_mod.shape[1] >= 1:
-                def date_time_comma(val):
+                def date_time_space(val):
                     if isinstance(val, str):
-                        # 尝试用空格或T分隔
-                        if ' ' in val:
-                            parts = val.split(' ', 1)
-                        elif 'T' in val:
-                            parts = val.split('T', 1)
-                        else:
-                            return val
-                        if len(parts) == 2:
-                            return f"{parts[0]},{parts[1]}"
+                        # 先将逗号替换为空格
+                        val = val.replace(',', ' ')
+                        # 如果有T分隔符也替换为空格
+                        val = val.replace('T', ' ')
                     return val
-                df_mod.iloc[:, 0] = df_mod.iloc[:, 0].apply(date_time_comma)
+                df_mod.iloc[:, 0] = df_mod.iloc[:, 0].apply(date_time_space)
             df_mod.to_excel(writer, index=False, header=False)
             workbook = writer.book
             worksheet = writer.sheets['Sheet1']
             from openpyxl.utils import get_column_letter
             from openpyxl.styles import Alignment, PatternFill, Font
 
-            # 设置A列列宽为原始宽度1.8倍
+            # 设置A列列宽为原始宽度2倍
             if worksheet.max_column >= 1:
                 col_letter = get_column_letter(1)
-                worksheet.column_dimensions[col_letter].width = 8.4 * 1.8
+                worksheet.column_dimensions[col_letter].width = 8.4 * 2
 
             # 设置第三列列宽为原始宽度0.8倍，字体居中
             if worksheet.max_column >= 3:
@@ -216,43 +211,53 @@ def save_to_excel(df, save_path):
                     cell = worksheet.cell(row=row, column=3)
                     cell.alignment = Alignment(horizontal='center')
 
-            # 处理第五列连续两行及以上的固定数值且>=80，标红金额和交易对方
+            # 新标红逻辑：第5列连续两行及以上的固定数值且>=80，且这些行第3列内容含“支出”，标红第1、3、5、6列
             amount_col = 5
             target_col = 6
+            time_col = 1
+            expense_col = 3
             red_font = Font(color='FFFF0000')
-            orange_font = Font(color='FFFF9900')
-            data = [worksheet.cell(row=i, column=amount_col).value for i in range(1, worksheet.max_row + 1)]
-            n = len(data)
+            data_amount = [worksheet.cell(row=i, column=amount_col).value for i in range(1, worksheet.max_row + 1)]
+            data_expense = [worksheet.cell(row=i, column=expense_col).value for i in range(1, worksheet.max_row + 1)]
+            n = len(data_amount)
             i = 0
             while i < n:
-                val = data[i]
+                val = data_amount[i]
                 try:
                     num = float(str(val).replace(',', '').replace(' ', ''))
                 except:
                     i += 1
                     continue
-                if num < 80:
+                # 判断是否支出项（第3列内容含“支出”）
+                exp_val = str(data_expense[i]) if i < len(data_expense) else ''
+                is_expense = ('支出' in exp_val)
+                if num < 80 or not is_expense:
                     i += 1
                     continue
-                # 检查后续有多少行相同
+                # 检查后续有多少行相同且第3列为支出项
                 j = i + 1
                 while j < n:
                     try:
-                        next_num = float(str(data[j]).replace(',', '').replace(' ', ''))
+                        next_num = float(str(data_amount[j]).replace(',', '').replace(' ', ''))
                     except:
                         break
-                    if next_num == num:
+                    exp_val_j = str(data_expense[j]) if j < len(data_expense) else ''
+                    is_expense_j = ('支出' in exp_val_j)
+                    if next_num == num and is_expense_j:
                         j += 1
                     else:
                         break
                 if j - i >= 2:
                     for k in range(i, j):
+                        worksheet.cell(row=k+1, column=time_col).font = red_font
+                        worksheet.cell(row=k+1, column=expense_col).font = red_font
                         worksheet.cell(row=k+1, column=amount_col).font = red_font
                         worksheet.cell(row=k+1, column=target_col).font = red_font
                     i = j
                 else:
                     i += 1
             # 对第五列数值大于等于5000的金额和交易对方字体标橙（优先级低于红色）
+            orange_font = Font(color='FFFF9900')
             for row in range(1, worksheet.max_row + 1):
                 cell_amount = worksheet.cell(row=row, column=amount_col)
                 cell_target = worksheet.cell(row=row, column=target_col)
@@ -260,7 +265,6 @@ def save_to_excel(df, save_path):
                     num = float(str(cell_amount.value).replace(',', '').replace(' ', ''))
                 except:
                     continue
-                # 只要不是红色才标橙
                 is_red = cell_amount.font and cell_amount.font.color and cell_amount.font.color.rgb == 'FFFF0000'
                 if num >= 5000 and not is_red:
                     cell_amount.font = orange_font
