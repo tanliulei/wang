@@ -177,50 +177,95 @@ def process_excel_data(df):
 
 def save_to_excel(df, save_path):
     """
-    Save DataFrame to Excel file with merged cells and adjusted column widths
+    保存DataFrame到Excel文件，并对A列列宽设置为原始宽度的1.8倍，A列日期和时间用逗号隔开，其他标记逻辑同前。第五列数值大于等于5000的金额和交易对方字体标橙（优先级低于红色），去掉绿色标记。
     """
     try:
-        # Create Excel file using pandas ExcelWriter
         with pd.ExcelWriter(save_path, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, header=False)
-            
-            # Get the workbook and worksheet for formatting
+            # 先处理A列内容：将日期和时间用逗号隔开
+            df_mod = df.copy()
+            if df_mod.shape[1] >= 1:
+                def date_time_comma(val):
+                    if isinstance(val, str):
+                        # 尝试用空格或T分隔
+                        if ' ' in val:
+                            parts = val.split(' ', 1)
+                        elif 'T' in val:
+                            parts = val.split('T', 1)
+                        else:
+                            return val
+                        if len(parts) == 2:
+                            return f"{parts[0]},{parts[1]}"
+                    return val
+                df_mod.iloc[:, 0] = df_mod.iloc[:, 0].apply(date_time_comma)
+            df_mod.to_excel(writer, index=False, header=False)
             workbook = writer.book
             worksheet = writer.sheets['Sheet1']
-            
-            # Apply formatting and merge cells strategically
-            if worksheet.max_row > 0 and worksheet.max_column > 0:
-                # Merge cells in the first row if it exists (as header)
-                if worksheet.max_row >= 1 and worksheet.max_column > 1:
+            from openpyxl.utils import get_column_letter
+            from openpyxl.styles import Alignment, PatternFill, Font
+
+            # 设置A列列宽为原始宽度1.8倍
+            if worksheet.max_column >= 1:
+                col_letter = get_column_letter(1)
+                worksheet.column_dimensions[col_letter].width = 8.4 * 1.8
+
+            # 设置第三列列宽为原始宽度0.8倍，字体居中
+            if worksheet.max_column >= 3:
+                col_letter = get_column_letter(3)
+                worksheet.column_dimensions[col_letter].width = 6.7  # 8.4*0.8
+                for row in range(1, worksheet.max_row + 1):
+                    cell = worksheet.cell(row=row, column=3)
+                    cell.alignment = Alignment(horizontal='center')
+
+            # 处理第五列连续两行及以上的固定数值且>=80，标红金额和交易对方
+            amount_col = 5
+            target_col = 6
+            red_font = Font(color='FFFF0000')
+            orange_font = Font(color='FFFF9900')
+            data = [worksheet.cell(row=i, column=amount_col).value for i in range(1, worksheet.max_row + 1)]
+            n = len(data)
+            i = 0
+            while i < n:
+                val = data[i]
+                try:
+                    num = float(str(val).replace(',', '').replace(' ', ''))
+                except:
+                    i += 1
+                    continue
+                if num < 80:
+                    i += 1
+                    continue
+                # 检查后续有多少行相同
+                j = i + 1
+                while j < n:
                     try:
-                        worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=min(worksheet.max_column, 5))
-                    except Exception:
-                        pass
-                
-                # Adjust column widths and formatting
-                from openpyxl.utils import get_column_letter
-                from openpyxl.styles import Alignment
-                
-                # Get default column width (Excel default is approximately 8.43)
-                default_width = 8.43
-                a_column_width = default_width * 2    # A列2倍宽度
-                f_column_width = default_width * 3    # F列保持3倍宽度
-                
-                # Set column A (交易时间) width to 2x and add left alignment
-                if worksheet.max_column >= 1:
-                    worksheet.column_dimensions[get_column_letter(1)].width = a_column_width
-                    
-                    # Apply left alignment to column A
-                    for row in range(1, worksheet.max_row + 1):
-                        cell = worksheet.cell(row=row, column=1)
-                        cell.alignment = Alignment(horizontal='left')
-                
-                # Set column F (交易对方) width to 3x
-                if worksheet.max_column >= 6:
-                    worksheet.column_dimensions[get_column_letter(6)].width = f_column_width
-        
+                        next_num = float(str(data[j]).replace(',', '').replace(' ', ''))
+                    except:
+                        break
+                    if next_num == num:
+                        j += 1
+                    else:
+                        break
+                if j - i >= 2:
+                    for k in range(i, j):
+                        worksheet.cell(row=k+1, column=amount_col).font = red_font
+                        worksheet.cell(row=k+1, column=target_col).font = red_font
+                    i = j
+                else:
+                    i += 1
+            # 对第五列数值大于等于5000的金额和交易对方字体标橙（优先级低于红色）
+            for row in range(1, worksheet.max_row + 1):
+                cell_amount = worksheet.cell(row=row, column=amount_col)
+                cell_target = worksheet.cell(row=row, column=target_col)
+                try:
+                    num = float(str(cell_amount.value).replace(',', '').replace(' ', ''))
+                except:
+                    continue
+                # 只要不是红色才标橙
+                is_red = cell_amount.font and cell_amount.font.color and cell_amount.font.color.rgb == 'FFFF0000'
+                if num >= 5000 and not is_red:
+                    cell_amount.font = orange_font
+                    cell_target.font = orange_font
         return True
-    
     except Exception as e:
         st.error(f"Excel文件保存失败: {str(e)}")
         return False
