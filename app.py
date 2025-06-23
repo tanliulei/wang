@@ -274,6 +274,40 @@ def save_to_excel(df, save_path):
         st.error(f"Excel文件保存失败: {str(e)}")
         return False
 
+def extract_pdf_title_name(pdf_file):
+    """
+    从PDF首页提取“兹证明：”后面的姓名作为Excel文件名。
+    """
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+            first_page = pdf.pages[0]
+            text = first_page.extract_text()
+            if text:
+                lines = text.split('\n')
+                # 优先找“兹证明：”
+                for line in lines:
+                    if '兹证明：' in line:
+                        # 取“兹证明：XXX”格式
+                        parts = line.split('兹证明：', 1)
+                        if len(parts) == 2:
+                            name = parts[1].strip()
+                            # 去除后续非姓名字符
+                            name = name.split()[0] if name else '导出文件'
+                            return name
+                # 兜底：找“姓名”
+                for line in lines:
+                    if '姓名' in line:
+                        parts = line.replace('：', ':').split(':')
+                        if len(parts) == 2:
+                            return parts[1].strip()
+                        else:
+                            return line.strip().replace('姓名', '').strip()
+                # 否则取第一行
+                return lines[0].strip()
+    except Exception:
+        pass
+    return '导出文件'
+
 def main():
     st.title("📄 PDF到Excel转换神器")
     st.markdown("---")
@@ -309,6 +343,8 @@ def main():
                 status_text.text("正在提取PDF数据...")
                 progress_bar.progress(20)
                 df = extract_pdf_to_dataframe(tmp_file_path)
+                # 新增：提取PDF抬头姓名
+                excel_title = extract_pdf_title_name(tmp_file_path)
                 if df is not None:
                     progress_bar.progress(40)
                     status_text.text("PDF数据提取完成")
@@ -331,12 +367,12 @@ def main():
                         save_dir = os.path.expanduser("~/Downloads")
                         if not os.path.exists(save_dir):
                             save_dir = temp_module.gettempdir()
-                        base_name = uploaded_file.name.rsplit('.', 1)[0]
-                        excel_filename = f"{base_name}_processed.xlsx"
+                        # 用抬头姓名作为文件名
+                        excel_filename = f"{excel_title}.xlsx"
                         save_path = os.path.join(save_dir, excel_filename)
                         counter = 1
                         while os.path.exists(save_path):
-                            excel_filename = f"{base_name}_processed_{counter}.xlsx"
+                            excel_filename = f"{excel_title}_{counter}.xlsx"
                             save_path = os.path.join(save_dir, excel_filename)
                             counter += 1
                         if save_to_excel(processed_df, save_path):
